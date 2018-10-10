@@ -907,8 +907,8 @@ class SnappySharedFactory(AbstractDataFactory):
         # 1. Pre-processing
 
         # Check requested variable in variables dictionary
-        if variable not in [v.name for v in variables]:
-            raise RuntimeError("%s variable not available in opened %s product" % (variable, attributes['product_string']))
+        # if variable not in [v.name for v in variables]:
+        #     raise RuntimeError("%s variable not available in opened %s product" % (variable, attributes['product_string']))
 
         # * special case for time_stamp as values in metadata
         if variable == "time_stamp":

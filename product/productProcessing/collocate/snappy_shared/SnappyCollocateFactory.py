@@ -1,11 +1,10 @@
 """
-Processing factory for converting Sentinel-3 OLCI L1 eopy.product.productIO.Product.Product objects to reflectance units
+Collocate factory for *eopy.product.productIO.Product.Product* objects which contain instantiations of snappy products
 """
 
 '''___Built-In Modules___'''
 import sys
 from os.path import dirname
-from os.path import join as pjoin
 from copy import deepcopy
 import re
 
@@ -14,42 +13,39 @@ from snappy import GPF
 import jpy
 
 '''___NPL Modules___'''
-productProcessing_directory = dirname(dirname(dirname(dirname(dirname(__file__)))))
-sys.path.append(productProcessing_directory)
+sys.path.append(dirname(dirname(__file__)))
 from AbstractProcessingFactory import AbstractProcessingFactory
 
-productIO_directory = pjoin(dirname(productProcessing_directory), "productIO")
-sys.path.append(productIO_directory)
-from Product import Product
+from eopy import Product
 
 
 '''___Authorship___'''
 __author__ = "Sam Hunt"
-__created__ = "25/06/2017"
+__created__ = "01/10/2018"
 __credits__ = ["Andrew Banks", "Javier Gorrono", "Niall Origo", "Tracy Scanlon"]
-__version__ = "0.0"
+__version__ = "0.1"
 __maintainer__ = "Sam Hunt"
 __email__ = "sam.hunt@npl.co.uk"
 __status__ = "Development"
 
 
-class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
+class SnappyCollocateFactory(AbstractProcessingFactory):
     """
-    OLCIL1Radiance2ReflectanceFactory is a sub-class of *AbstractProcessingFactory* for converting Sentinel-3 OLCI L1
-    *eopy.product.productIO.Product.Product* objects to units of reflectance.
+    SnappyCollocateFactory is a sub-class of *AbstractProcessingFactory* for collocating a pair of Sentinel
+    *eopy.product.productIO.Product.Product* products.
 
     :Methods:
         .. py:method:: processProduct(...):
 
-            Returns input *eopy.product.productIO.Product.Product* OLCI L1 data object in units of reflectance
+            Returns *eopy.product.productIO.Product.Product* product collocated with master product
 
         .. py:method:: updateProductName(...):
 
             Return product_name entry of processed *eopy.product.productIO.Product.Product* product dictionary attribute
 
-        .. py:method:: convertProduct(...):
+        .. py:method:: collocateProducts(...):
 
-            Return OLCI *snappy.Product* data product object with units converted to reflectance
+            Returns *snappy.Product* product collocated with master product
 
         .. py:method:: updateProductVariablesAttributes(...):
 
@@ -57,13 +53,13 @@ class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
 
         .. py:method:: updateCommonAttributes(...):
 
-            Returns updated ``attributes`` attribute of OLCI L1 *eopy.product.productIO.Product.Product* product with
-            units converted to for common snappy product attributes
+            Returns updated ``attributes`` attribute for collocated *eopy.product.productIO.Product.Product* product
+            for common snappy product attributes
 
         .. py:method:: updateSpecificAttributes(...):
 
-            Returns updated ``attributes`` attribute of OLCI L1 *eopy.product.productIO.Product.Product* product with
-            units converted to for specific OLCI L1 product attributes
+            Returns updated ``attributes`` attribute for collocated *eopy.product.productIO.Product.Product* product
+            for specific individual products snappy product attributes (should be updated in subclasses)
 
         .. py:method:: updateAttributesProcessingLog(...):
 
@@ -87,15 +83,27 @@ class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
 
     def processProduct(self, product, **kwargs):
         """
-        Returns input *eopy.product.productIO.Product.Product* OLCI L1 data object in units of reflectance
+        Returns *eopy.product.productIO.Product.Product* product collocated with master product
 
         :type product: eopy.product.productIO.Product.Product
-        :param product: Data product to process
+        :param product: Data product to collocate
+
+        :type master: eopy.product.productIO.Product.Product
+        :param master: Data product to collocate product to (pixel values conserved)
+
+        :param resampling: str
+        :param resampling: resampling method to use on product in collocation process. Options
+
+        * "nearest_neighbour" (default)
+        * "bilinear_interpolation"
+        * "cubic_convolution"
+        * "bisinc_interpolation"
+        * "bicubic_interpolation"
 
         :return:
             :product_processed: *eopy.product.productIO.Product.Product*
 
-            Processed data product
+            Collocated data product
         """
 
         # Initialise subset empty subset product
@@ -108,12 +116,16 @@ class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
         ################################################################################################################
 
         # Loop through products in product attribute and update dictionary entries
-        # (should be just one for OLCI products)
-        for i, p in enumerate(product.product):
 
-            # Convert units to reflectance
+        master_product = kwargs["master"]
+        resampling = kwargs["resampling"] if "resampling" in kwargs.keys() else "nearest_neighbour"
+
+        for i, (p, m_p) in enumerate(zip(product.product, master_product.product)):
+
+            # Collocate products
             product_processed.product[i]["product_name"] = self.updateProductName(p["product_name"])
-            product_processed.product[i]["product"] = self.convertProduct(p["product"])
+            product_processed.product[i]["product"] = self.collocateProducts(p["product"], m_p["product"],
+                                                                             resampling=resampling)
             product_processed.product[i]["variables"] = self.updateProductVariablesAttributes(p["variables"])
 
         ################################################################################################################
@@ -126,7 +138,12 @@ class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
         product_processed.attributes = self.updateCommonAttributes(product_processed, product)
 
         # Update processing log
-        product_processed.attributes = self.updateAttributesProcessingLog(product_processed, "rad2refl", {})
+        product_processed.attributes = self.updateAttributesProcessingLog(product_processed, "collocate",
+                                                                          {"slave_product": product.
+                                                                                             attributes["product_name"],
+                                                                           "master_product": master_product.
+                                                                                             attributes["product_name"],
+                                                                           "resampling": resampling})
 
         # Update product specific attributes - should be updated in product specific sub-classes
         product_processed.attributes = self.updateSpecificAttributes(product_processed, product)
@@ -150,29 +167,46 @@ class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
 
         return original_product_name
 
-    def convertProduct(self, product, sensor="OLCI"):
+    def collocateProducts(self, product, master, resampling="nearest_neighbour"):
         """
-        Return OLCI *snappy.Product* data product object with units converted to reflectance
+        Returns *snappy.Product* product collocated with master product
 
         :type product: *snappy.Product*
-        :param product: In-memory OLCI L1 data product
+        :param product: In-memory data product
 
-        :param type: str
-        :param sensor: name of product sensor (default "OLCI")
+        :type master: eopy.product.productIO.Product.Product
+        :param master: Data product to collocate product to (pixel values conserved)
+
+        :param resampling: str
+        :param resampling: resampling method to use on product in collocation process. Options
+
+        * "nearest_neighbour" (default)
+        * "bilinear_interpolation"
+        * "cubic_convolution"
+        * "bisinc_interpolation"
+        * "bicubic_interpolation"
 
         :return:
             :product_processed: *snappy.Product*
 
-            In-memory OLCI L1 data product with units converted to reflectance
+            Collocated data product
         """
 
         HashMap = jpy.get_type('java.util.HashMap')
-        params = HashMap()
-        params.put("sensor", sensor)
-        params.put("conversionMode", "RAD_TO_REFL")
-        params.put("copyNonSpectralBands", "true")
 
-        product_processed = GPF.createProduct("Rad2Refl", params, product)
+        source_products = HashMap()
+        source_products.put('master', master)
+        source_products.put('slave', product)
+
+        params = HashMap()
+        params.put("targetProductType", "collocate")
+        params.put("renameMasterComponents", "true")
+        params.put("renameSlaveComponents", "false")
+        params.put("masterComponentPattern", "${ORIGINAL_NAME}_M")
+        # params.put("slaveComponentPattern", "${ORIGINAL_NAME}_S")
+        params.put("rasamplingType", resampling.upper())
+
+        product_processed = GPF.createProduct("Collocate", params, source_products)
 
         return product_processed
 
@@ -190,21 +224,12 @@ class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
             updated data product product attribute variables attribute
         """
 
-        # Start by initialising copy of original attributes
-        new_product_variables_attrs = deepcopy(original_product_variables_attrs)
-
-        # Replace radiance variable names to reflectance
-        rad_var_name = re.compile(r"Oa.*_radiance.*")
-        for i in range(len(new_product_variables_attrs)):
-            if rad_var_name.match(new_product_variables_attrs[i]):
-                new_product_variables_attrs[i] = new_product_variables_attrs[i].replace("radiance", "reflectance")
-
-        return new_product_variables_attrs
+        return original_product_variables_attrs
 
     def updateCommonAttributes(self, product_processed, product):
         """
-        Returns updated ``attributes`` attribute of OLCI L1 *eopy.product.productIO.Product.Product* product with units
-        converted to for common snappy product attributes
+        Returns updated ``attributes`` attribute for collocated *eopy.product.productIO.Product.Product* product
+        for common snappy product attributes
 
         :type product_processed: `eopy.product.productIO.Product.Product`
         :param product_processed: data product with units converted from radiance to reflectance
@@ -225,8 +250,8 @@ class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
 
     def updateSpecificAttributes(self, product_processed, product, **kwargs):
         """
-        Returns updated ``attributes`` attribute of OLCI L1 *eopy.product.productIO.Product.Product* product with units
-        converted to for specific OLCI L1 product attributes
+        Returns updated ``attributes`` attribute for collocated *eopy.product.productIO.Product.Product* product
+        for specific individual products snappy product attributes (should be updated in subclasses)
 
         :type product_processed: `eopy.product.productIO.Product.Product`
         :param product_processed: data product with units converted from radiance to reflectance
@@ -298,15 +323,6 @@ class OLCIL1Radiance2ReflectanceFactory(AbstractProcessingFactory):
 
         # Start by initialising copy of original attributes
         new_variables = deepcopy(product.variables)
-
-        # Replace radiance variable names to reflectance
-        rad_var_name = re.compile(r"Oa.*_radiance")
-        for i in range(len(new_variables)):
-            if rad_var_name.match(new_variables[i].name):
-
-                # Copy radiance variables attributes
-                new_variables[i].name = new_variables[i].name.replace("radiance", "reflectance")
-                new_variables[i].units = ""
 
         return new_variables
 
